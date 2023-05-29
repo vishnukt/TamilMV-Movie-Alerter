@@ -5,5 +5,6 @@ module.exports = {
 	},
 	dbUrl: process.env.dbUrl,
 	telegramAPIKey: process.env.telegramAPIKey,
-	telegramChatId: process.env.telegramChatId
+	telegramChatId: process.env.telegramChatId,
+	cronJobIntervalInMinutes: process.env.cronJobIntervalInMinutes
 };

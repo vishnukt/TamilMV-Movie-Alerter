@@ -19,7 +19,7 @@ exports.listTamilMVLatestMovies = async (req, res, next) => {
             return res.status(response.statusCode).send(response);
         }
 
-        let response = Response('success', '', { tamilMvMovieFinderResponse });
+        let response = Response('success', '', { newMovies: tamilMvMovieFinderResponse });
 		return res.status(response.statusCode).send(response);
     } catch(error) {
         winston.error('tamilMvMovieFinder function error', error);

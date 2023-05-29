@@ -1,13 +1,16 @@
 const cron = require('node-cron');
 const winston = require('winston');
-const telegram = require('../services/telegram.service');
-const rewardsCronJob = require('../repository/cron-jobs/rewards.cron-job');
+const { tamilMvMovieFinder } = require('../repository/tamilMV/tamilMV.functions');
+const config = require('../config/config');
 
 
-// At 03:00 AM (IST) (9:30 PM UST)
-cron.schedule('30 21 * * *', async function() {
-	await rewardsCronJob.expireRewards();
+// Schedule Cron Job only if Cron Env variable is set
+if (config.cronJobIntervalInMinutes) {
+	cron.schedule(`*/${config.cronJobIntervalInMinutes} * * * *`, async function() {
+		winston.info('CRON JOB - Find TamilMV Movies - Started');
 
-	telegram('CRON JOB - EXPIRE REWARDS', 'cron_job');
-	winston.log('CRON JOB - EXPIRE REWARDS');
-});
+		await tamilMvMovieFinder();
+
+		winston.info('CRON JOB - Find TamilMV Movies - Ended');
+	});
+}
