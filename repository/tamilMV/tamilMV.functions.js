@@ -1,9 +1,10 @@
-const telegram = require('../../services/telegram.service');
-const { Movie } = require('../../models/movie');
-const config = require('../../config/config');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const winston = require('winston');
+const stringSimilarity = require("string-similarity");
+const telegram = require('../../services/telegram.service');
+const { Movie } = require('../../models/movie');
+const config = require('../../config/config');
 
 
 /**
@@ -21,16 +22,41 @@ function parseMovieId(movieUrl) {
 
 
 /**
+ * Check if a String contains similar name
+ * @param {string} string 
+ * @param {string} comparingString 
+ * @returns {boolean} boolean
+ */
+function isStringSimilar(string, comparingString) {
+    try {
+        let strings = string.split(' ');
+
+        for (let item of strings) {
+            if (stringSimilarity.compareTwoStrings(item, comparingString) > 0.3) return true;
+        }
+
+        return false;
+    } catch(error) {
+        return false;
+    }
+}
+
+
+/**
  * Filters array of strings w.r.t search string
  * @param {array} array 
  * @param {string} filterString 
- * @returns {array}
+ * @param {boolean} checkSimilar
+ * @returns {array} array
  */
-function filterArrayOfStrings(array, filterString) {
+function filterArrayOfStrings(array, filterString, checkSimilar=false) {
 	try {
 		return array.filter(
 			(item) => {
-				if (item && item.search(filterString) != -1) return true;
+                if (!item) return false;
+
+				if (item.search(filterString) != -1) return true;
+                else if (checkSimilar && isStringSimilar(item, filterString)) return true;
 
 				return false;
 			}
@@ -47,12 +73,14 @@ function filterArrayOfStrings(array, filterString) {
  */
 exports.tamilMvMovieFinder = async () => {
     try {
+        winston.info('tamilMvMovieFinder func call started');
+
         try {
             var { data } = await axios.get('https://www.1tamilmv.autos/', { headers: config.axiosHeader });
         } catch(error) {
             winston.error('tamilMvMovieFinder Function - Error in fetching tamilmv mainpage API');
 
-            telegram.sendMessage('tamilMvMovieFinder Function - Error in fetching tamilmv mainpage API');
+            // telegram.sendMessage('tamilMvMovieFinder Function - Error in fetching tamilmv mainpage API');
 
             return null;
         }
@@ -63,30 +91,31 @@ exports.tamilMvMovieFinder = async () => {
         let movieUrls = $('.ipsWidget_inner.ipsPad.ipsType_richText a').get().map(x => $(x).attr('href'));
 
         // Fetching saved movies
-        let movies = []//await Movie.find({}, 'movieId isNotified').sort('-_id').limit(20).lean();
+        let movies = await Movie.find({ isNotified: true }, 'movieId isNotified').sort('-_id').limit(20).lean();
 
         let savedMovieIds = {};
-        movies.forEach(item => {
-            savedMovieIds[item.movieId] = item.isNotified;
-        });
+        movies.forEach(item => { savedMovieIds[item.movieId] = item.isNotified; });
 
-        let movieDetails = {};
-         // Bulk Save Telegram Notified Movies to DB
+        // Bulk Save Telegram Notified Movies to DB
         let movieBulkSave = [];
 
-        await movieUrls.forEach(async (item) => {
+        let movieDetails = {};
+
+        for (let item of movieUrls) {
+
             let movieId = parseMovieId(item);
 
             // winston.info(`MovieId: ${movieId}`);
 
-            if (savedMovieIds[movieId]) return;
+            // Skip Rest Movies - assuming preceding items are already notified
+            if (savedMovieIds[movieId]) break; // continue;
 
             try {
                 var { data } = await axios.get(item, { headers: config.axiosHeader });
             } catch(error) {
-                // winston.info(`Error in fetching tamilmv movie API, ${item}`);
+                winston.info(`Error in fetching tamilmv movie API, ${item}`);
 
-                return;
+                continue;
             }
 
             let S = cheerio.load(data);
@@ -100,23 +129,20 @@ exports.tamilMvMovieFinder = async () => {
 
             let strippedMovieName = movieName.split(' (')[0];
             let telegramMessage = `<b><a href='${item}'>${movieName}</a></b>\n\n\n`;
-            console.log('aaaa', telegramMessage)
 
-            movieQualityNames = filterArrayOfStrings(movieQualityNames, strippedMovieName);
+            movieQualityNames = filterArrayOfStrings(movieQualityNames, strippedMovieName, true);
             movieMagnetLinks = filterArrayOfStrings(movieMagnetLinks, 'magnet:');
 
-            movieDetails[movieId] = { 
+            movieDetails[movieId] = {
                 name: movieName,
                 link: item,
                 magnetLinks: [] 
             };
 
-            console.log(movieDetails)
-
             // Skip Movies with no magnet links
-            if (!movieMagnetLinks.length) return;
+            if (!movieMagnetLinks.length) continue;
 
-            await movieMagnetLinks.forEach((item, index) => {
+            movieMagnetLinks.forEach((item, index) => {
                 movieDetails[movieId].magnetLinks.push({
                     name: movieQualityNames[index],
                     url: item
@@ -132,19 +158,22 @@ exports.tamilMvMovieFinder = async () => {
                     movieId: movieId,
                     name: movieName,
                     strippedName: strippedMovieName,
-                    types: movieDetails[movieId].links
+                    types: movieDetails[movieId].links,
+                    isNotified: true
                 }));
             }
-        });
+        }
 
         // Saving to DB
-        // if (movieBulkSave.length) await Movie.insertMany(movieBulkSave);
+        if (movieBulkSave.length) await Movie.insertMany(movieBulkSave);
+
+        winston.info('tamilMvMovieFinder func call ended');
 
         return movieDetails;
     } catch(error) {
         winston.error('tamilMvMovieFinder function error', error);
 
-        telegram.sendMessage('tamilMvMovieFinder function error', 'gideon');
+        // telegram.sendMessage('tamilMvMovieFinder function error');
 
         return null;
     }
